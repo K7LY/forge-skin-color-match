@@ -5,7 +5,7 @@ Source revision: Forge `dfdcbab685e57677014f05a3309b48cc87383167`.
 
 ## Executed locally
 
-- **33 tests passed**, zero skips with the downloaded Forge sources present.
+- **42 tests passed**, zero skips with the downloaded Forge sources present.
 - Python compile checks passed for the adapter, core, tests and tools.
 - Ruff checks passed using the repository's `pyproject.toml` configuration.
 - Actual Gradio **4.40.0** components were constructed in a `gr.Blocks` context;
@@ -23,7 +23,7 @@ python tools/fetch_forge_sources.py
 python -m unittest discover -s tests -v
 python -m compileall -q scripts skinmatch_core.py tests tools
 python -m ruff check scripts skinmatch_core.py tests tools
-python tools/evaluate_synthetic.py --output docs/demo
+python tools/evaluate_synthetic.py --output docs/demo --baseline-ref e83bb2d
 ```
 
 The source-backed geometry test exercises 16 mode/inversion combinations with two
@@ -35,22 +35,52 @@ passing merely because the adapter safely skipped everything.
 
 ## Reproducible synthetic measurements
 
-Default strength **0.7**, radius **48**, inward feather **24**, brightness **0.3**.
+Default strength **0.7**, radius **48**, feather upper limit **24**, brightness **0.3**.
 These shaded, textured ellipses simulate colour shifts; they are not photos of
 actual arms or faces. The labels identify the intended colour-shift scenario.
 
-| Synthetic scenario | Mean-colour Delta E76 before | After | Changed pixels outside edit mask | Strength 0 exact |
-| --- | ---: | ---: | ---: | --- |
-| Arm patch | 9.36 | 7.13 | 0 | Yes |
-| Face patch | 7.68 | 5.66 | 0 | Yes |
-| Clothes near patch | 9.20 | 6.92 | 0 | Yes |
+| Synthetic scenario | Before | Previous core (`e83bb2d`) | Current core | Outside changed | Strength 0 exact |
+| --- | ---: | ---: | ---: | ---: | --- |
+| Arm patch | 9.64 | 7.50 | 4.58 | 0 | Yes |
+| Face patch | 7.53 | 5.51 | 2.41 | 0 | Yes |
+| Clothes near patch | 9.64 | 7.51 | 4.66 | 0 | Yes |
+| Very pale patch | 20.55 | 18.79 | 13.15 | 0 | Yes |
+| Thin patch | 7.54 | 7.31 | 2.09 | 0 | Yes |
 
-Values measure the Euclidean distance between the reference skin's weighted mean
-CIELAB and the generated skin's weighted mean CIELAB, before and after the final
-RGB composite. They do not measure person identity, semantic correctness, image
-quality or corresponding-pixel reconstruction. They need not approach zero because
-brightness is deliberately weak and the correction fades to zero at the boundary.
+For a fair cross-version comparison, this table uses the same untrimmed mean LAB
+of the corresponding original masked patch as ground truth for every output.
+The source image, generated image, mask and strength/brightness/radius/feather
+settings are identical. Previously reported diagnostic numbers used each
+algorithm's selected reference statistics, which differ as reference selection
+changes. Those runtime diagnostics remain in the JSON `regions` entries; the
+fixed-reference comparison appears under `against_original_patch`.
+
+This is mean-colour Delta E76, not a skin segmentation accuracy or matching rate.
+It does not measure semantic correctness or overall visual quality. Brightness
+remains intentionally weak at its default value, so pale patches retain some
+luminance mismatch; stronger brightness settings can reduce that component.
 Texture correlation is checked separately; it exceeds 0.98 on the tested patch.
+
+## Matching changes
+
+The skin eligibility envelope is explicit and user-adjustable: a in **-2..42**
+and b in **0..50** by default, in float CIELAB coordinates. RGB, YCrCb and L
+conditions additionally restrict it to plausible warm skin. Colours outside the
+envelope are excluded from both statistics and output changes. Confidence weights
+statistics rather than reducing correction strength a second time. Low-saturation
+pale skin stays eligible while neutral white is excluded.
+
+Reference statistics now favour near-boundary skin with exponential distance
+decay. The inward feather width is capped at one fifth of each editable skin
+component's inradius so narrow patches retain a full-strength interior.
+When the original skin beneath a boundary is compatible with the external
+reference, its colour difference guides the blend: a hard pre-existing seam gets
+correction at the edge, while already-matching composite pixels retain their colour.
+Original non-skin pixels do not guide this boundary adjustment.
+
+Additional regression cases cover explicit range exclusion of warm-coloured
+fabric, invalid range bounds, pale skin, narrow-mask correction, high-strength
+matching, pre-existing hard seams and already-matching boundaries.
 
 The core tests also cover no-reference skips, small/empty/full masks, non-skin
 preservation inside the edit, two distinct skin tones, distant-person rejection,

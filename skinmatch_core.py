@@ -13,6 +13,26 @@ from PIL import Image
 
 
 @dataclass(frozen=True)
+class SkinRange:
+    """Inclusive CIELAB chroma envelope shared by reference and edit pixels."""
+
+    a_min: float = -2.0
+    a_max: float = 42.0
+    b_min: float = 0.0
+    b_max: float = 50.0
+
+    def validate(self):
+        values = [self.a_min, self.a_max, self.b_min, self.b_max]
+        if not np.isfinite(values).all() or not (
+            -128 <= self.a_min < self.a_max <= 127 and -128 <= self.b_min < self.b_max <= 127
+        ):
+            raise ValueError("Skin a/b ranges must be finite, ordered and within -128..127")
+
+
+DEFAULT_SKIN_RANGE = SkinRange()
+
+
+@dataclass(frozen=True)
 class MatchSettings:
     strength: float = 0.7
     reference_radius: int = 48
@@ -20,6 +40,7 @@ class MatchSettings:
     brightness: float = 0.3
     reference_mode: str = "Auto"
     min_pixels: int = 64
+    skin_range: SkinRange = DEFAULT_SKIN_RANGE
 
     def validate(self):
         if not (0 <= self.strength <= 1 and 0 <= self.brightness <= 1):
@@ -30,6 +51,7 @@ class MatchSettings:
             raise ValueError("Unknown reference mode")
         if not 16 <= self.min_pixels <= 100000:
             raise ValueError("Invalid minimum sample count")
+        self.skin_range.validate()
 
 
 @dataclass
@@ -75,7 +97,9 @@ def _ramp(x, low, high):
     return t * t * (3 - 2 * t)
 
 
-def skin_confidence(rgb: np.ndarray, lab: np.ndarray | None = None) -> np.ndarray:
+def skin_confidence(
+    rgb: np.ndarray, lab: np.ndarray | None = None, skin_range: SkinRange = DEFAULT_SKIN_RANGE
+) -> np.ndarray:
     """A colour heuristic, NOT semantic segmentation or person identification.
 
     Broad warm-skin gates include dark and pale tones; saturated red/yellow,
@@ -87,6 +111,23 @@ def skin_confidence(rgb: np.ndarray, lab: np.ndarray | None = None) -> np.ndarra
     light, a, b = np.moveaxis(lab, -1, 0)
     cr, cb = ycc[..., 1], ycc[..., 2]
     r, g, blue = np.moveaxis(rgb.astype(np.float32), -1, 0)
+    eligible = (
+        (light >= 6)
+        & (light <= 99)
+        & (a >= skin_range.a_min)
+        & (a <= skin_range.a_max)
+        & (b >= skin_range.b_min)
+        & (b <= skin_range.b_max)
+        & (cr >= 127)
+        & (cr <= 193)
+        & (cb >= 75)
+        & (cb <= 139)
+        & (r >= g - 4)
+        & (r >= blue + 3)
+        & (g >= blue - 6)
+    )
+    # Confidence weights statistics only. Every pixel inside the explicit
+    # envelope remains eligible, including pale/low-saturation skin.
     score = np.minimum.reduce(
         [
             _ramp(light, 6, 12) * (1 - _ramp(light, 95, 99)),
@@ -99,16 +140,22 @@ def skin_confidence(rgb: np.ndarray, lab: np.ndarray | None = None) -> np.ndarra
             _ramp(g - blue, -6, 3),
         ]
     )
-    score[score < 0.1] = 0
-    return score.astype(np.float32)
+    return np.where(eligible, np.maximum(score, 0.5), 0).astype(np.float32)
 
 
-def inward_feather(support: np.ndarray, radius: int) -> np.ndarray:
-    """Distance ramp confined to support, including when it touches the frame."""
+def inward_feather(support: np.ndarray, radius: int, adaptive: bool = False) -> np.ndarray:
+    """Inward distance ramp; adaptive width retains a plateau on thin patches."""
     if radius == 0:
         return support.astype(np.float32)
     padded = np.pad(support.astype(np.uint8), 1)
     distance = cv2.distanceTransform(padded, cv2.DIST_L2, cv2.DIST_MASK_PRECISE)[1:-1, 1:-1]
+    if adaptive:
+        count, labels = cv2.connectedComponents(support.astype(np.uint8), 8)
+        maxima = np.zeros(count, dtype=np.float32)
+        np.maximum.at(maxima, labels.ravel(), distance.ravel())
+        # One fifth of the local inradius leaves most editable skin at full
+        # strength, even on masks narrower than twice the requested feather.
+        radius = np.minimum(float(radius), np.maximum(1.0, (maxima[labels] - 1) * 0.2))
     # Boundary pixel is zero, avoiding a colour step at a hard mask edge.
     return _ramp(distance, 1, radius + 1) * support
 
@@ -189,16 +236,16 @@ def match_skin(
     rgb = np.asarray(generated.convert("RGB"))
     ref_rgb = np.asarray(original.convert("RGB"))
     lab, ref_lab = rgb_to_lab(rgb), rgb_to_lab(ref_rgb)
-    target_skin = skin_confidence(rgb, lab)
-    ref_skin = skin_confidence(ref_rgb, ref_lab)
+    target_skin = skin_confidence(rgb, lab, settings.skin_range)
+    ref_skin = skin_confidence(ref_rgb, ref_lab, settings.skin_range)
     support = editable & (target_skin > 0)
     count, labels, regions, _ = cv2.connectedComponentsWithStats(support.astype(np.uint8), 8)
     if count > 257:
         report.reason = "fragmented_skin_mask"
         return generated, report
-    # Smooth confidence inward without ever changing a rejected non-skin pixel.
-    soft_skin = cv2.GaussianBlur(target_skin, (0, 0), 0.8) * (target_skin > 0)
-    base_alpha = inward_feather(editable, settings.feather) * edit * soft_skin
+    # Detection and correction strength are independent. Feather the actual
+    # editable skin components, so clothing holes also get an inward transition.
+    base_alpha = inward_feather(support, settings.feather, adaptive=True) * edit
     output = np.array(generated, copy=True)
     manual_stats = _stats(ref_lab, ref_skin * manual, settings.min_pixels) if manual is not None else None
     for label in range(1, count):
@@ -210,6 +257,8 @@ def match_skin(
         x1, y1 = min(rgb.shape[1], x + width + margin), min(rgb.shape[0], y + height + margin)
         roi = np.s_[y0:y1, x0:x1]
         component = labels[roi] == label
+        if not np.any(base_alpha[roi][component] > 0):
+            continue
         target_weights = target_skin[roi] * edit[roi] * component
         target_stats = _stats(lab[roi], target_weights, settings.min_pixels)
         if target_stats is None:
@@ -225,7 +274,10 @@ def match_skin(
             )
             if reference is None:
                 continue
-            weights = ref_skin[roi] * reference / (1 + distances / max(1, settings.reference_radius))
+            # Local statistics should follow nearby skin rather than distant
+            # portions of the same connected person's skin/shading.
+            decay = max(2.0, settings.reference_radius / 4.0)
+            weights = ref_skin[roi] * reference * np.exp(-distances / decay)
             reference_stats = _stats(ref_lab[roi], weights, settings.min_pixels)
         else:
             reference_stats = manual_stats
@@ -250,6 +302,20 @@ def match_skin(
         corrected_lab[..., 1:] = np.clip(corrected_lab[..., 1:], -100, 100)
         corrected_rgb = cv2.cvtColor(corrected_lab.astype(np.float32), cv2.COLOR_LAB2RGB) * 255.0
         alpha = base_alpha[roi] * component
+        if settings.feather > 0:
+            # Consistent original skin can guide boundary blending: a hard
+            # colour seam needs correction up to its edge, while an already
+            # composited edge needs less. Reference statistics remain external.
+            original_consistent = (
+                (ref_skin[roi] > 0)
+                & (np.linalg.norm(ref_lab[roi][..., 1:] - ref_mean[1:], axis=-1) <= 10)
+                & (np.abs(ref_lab[roi][..., 0] - ref_mean[0]) <= 20)
+            )
+            projected = np.sum((ref_lab[roi] - local_lab) * delta, axis=-1)
+            magnitude = np.sum(delta * delta, axis=-1)
+            needed = np.clip(projected / np.maximum(magnitude, 1e-6), 0, 1)
+            boundary = component & original_consistent & (base_alpha[roi] < edit[roi])
+            alpha[boundary] = (edit[roi] * needed)[boundary]
         changed = alpha > 0
         if not changed.any():
             continue

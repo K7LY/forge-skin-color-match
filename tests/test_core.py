@@ -4,7 +4,7 @@ import cv2
 import numpy as np
 from PIL import Image
 
-from skinmatch_core import MatchSettings, inward_feather, match_skin, rgb_to_lab, skin_confidence
+from skinmatch_core import MatchSettings, SkinRange, inward_feather, match_skin, rgb_to_lab, skin_confidence
 
 
 def scene(shape=(192, 256), tone=(176, 124, 98)):
@@ -47,8 +47,10 @@ class CoreTests(unittest.TestCase):
         output, report = match_skin(generated, Image.fromarray(original), mask)
         self.assertEqual(report.reason, "corrected")
         delta = np.linalg.norm(np.array(output).astype(float) - np.array(generated), axis=-1)
-        self.assertTrue(np.all(delta[65, 95:155] == 0))
-        self.assertLess(delta[66, 120], delta[90, 120])
+        self.assertGreater(delta[65, 120], 0)
+        before_seam = np.linalg.norm(np.array(generated)[65, 120].astype(float) - original[64, 120])
+        after_seam = np.linalg.norm(np.array(output)[65, 120].astype(float) - original[64, 120])
+        self.assertLess(after_seam, before_seam * 0.6)
         self.assertLess(report.regions[0].delta_e_after, report.regions[0].delta_e_before)
 
     def test_clothing_and_hair_are_excluded(self):
@@ -225,6 +227,87 @@ class CoreTests(unittest.TestCase):
         result, report = match_skin(generated, Image.fromarray(original), soft)
         self.assertEqual(report.reason, "corrected")
         np.testing.assert_array_equal(np.array(result)[soft == 0], np.array(generated)[soft == 0])
+
+    def test_range_limits_exclude_skin_like_orange_clothing(self):
+        original, mask = scene()
+        generated = np.array(shifted(original, mask))
+        # Warm fabric can fall inside the broad default skin envelope. The
+        # user can explicitly exclude its higher b while keeping this skin.
+        generated[80:110, 110:125] = (210, 145, 80)
+        colour = rgb_to_lab(generated[80:81, 110:111])[0, 0]
+        self.assertGreater(colour[2], 40)
+        self.assertGreater(skin_confidence(generated)[85, 115], 0)
+        settings = MatchSettings(skin_range=SkinRange(b_max=32))
+        result, report = match_skin(Image.fromarray(generated), Image.fromarray(original), mask, settings)
+        self.assertEqual(report.reason, "corrected")
+        np.testing.assert_array_equal(np.array(result)[80:110, 110:125], generated[80:110, 110:125])
+        accepted = skin_confidence(generated, skin_range=settings.skin_range) > 0
+        np.testing.assert_array_equal(np.array(result)[~accepted], generated[~accepted])
+
+    def test_skin_range_rejects_invalid_bounds(self):
+        for envelope in (
+            SkinRange(a_min=43, a_max=42),
+            SkinRange(b_min=50, b_max=50),
+            SkinRange(a_max=float("nan")),
+            SkinRange(b_min=-129),
+        ):
+            with self.assertRaises(ValueError):
+                MatchSettings(skin_range=envelope).validate()
+
+    def test_very_pale_skin_remains_eligible_but_neutral_white_is_excluded(self):
+        colours = np.array([[(250, 247, 242), (244, 240, 232), (245, 245, 245)]], dtype=np.uint8)
+        scores = skin_confidence(colours)[0]
+        self.assertTrue(np.all(scores[:2] >= 0.5))
+        self.assertEqual(scores[2], 0)
+
+    def test_adaptive_feather_keeps_a_full_strength_interior_on_thin_masks(self):
+        mask = np.zeros((100, 100), bool)
+        mask[30:70, 43:57] = True
+        fixed = inward_feather(mask, 24)
+        adaptive = inward_feather(mask, 24, adaptive=True)
+        self.assertLess(fixed.max(), 0.2)
+        self.assertEqual(adaptive.max(), 1)
+        self.assertTrue(np.all(adaptive[~mask] == 0))
+        self.assertTrue(np.all(adaptive[30, :] == 0))
+
+    def test_full_strength_matches_uniform_reference(self):
+        original = np.full((120, 160, 3), (180, 130, 105), np.uint8)
+        mask = np.zeros((120, 160), np.uint8)
+        mask[30:90, 40:120] = 255
+        generated = shifted(original, mask, (20, 5, 0))
+        output, report = match_skin(
+            generated, Image.fromarray(original), mask, MatchSettings(strength=1, brightness=1, feather=0)
+        )
+        self.assertEqual(report.reason, "corrected")
+        expected = rgb_to_lab(original)[mask > 0].mean(axis=0)
+        actual = rgb_to_lab(np.array(output))[mask > 0].mean(axis=0)
+        self.assertLess(np.linalg.norm(actual - expected), 0.5)
+
+    def test_default_matching_removes_most_chroma_error_on_small_patch(self):
+        original, mask = scene()
+        generated = shifted(original, mask, (12, -3, -6))
+        output, _ = match_skin(generated, Image.fromarray(original), mask)
+        ref = rgb_to_lab(original)[mask > 0].mean(axis=0)
+        before = rgb_to_lab(np.array(generated))[mask > 0].mean(axis=0)
+        after = rgb_to_lab(np.array(output))[mask > 0].mean(axis=0)
+        self.assertLess(np.linalg.norm(after[1:] - ref[1:]), 0.45 * np.linalg.norm(before[1:] - ref[1:]))
+
+    def test_already_matching_composite_boundary_is_preserved(self):
+        original, mask = scene()
+        generated = np.array(shifted(original, mask))
+        generated[65:68, 95:155] = original[65:68, 95:155]
+        source = Image.fromarray(generated)
+        output, report = match_skin(source, Image.fromarray(original), mask)
+        self.assertEqual(report.reason, "corrected")
+        np.testing.assert_array_equal(np.array(output)[65:68, 95:155], generated[65:68, 95:155])
+
+    def test_original_background_does_not_guide_skin_boundary(self):
+        original, mask = scene()
+        generated = shifted(original, mask)
+        original[mask > 0] = (10, 50, 100)
+        output, report = match_skin(generated, Image.fromarray(original), mask)
+        self.assertEqual(report.reason, "corrected")
+        np.testing.assert_array_equal(np.array(output)[65, 95:155], np.array(generated)[65, 95:155])
 
 
 if __name__ == "__main__":

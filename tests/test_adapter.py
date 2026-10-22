@@ -26,9 +26,20 @@ class AdapterTests(unittest.TestCase):
 
         with gr.Blocks():
             controls = self.host.script.ui(True)
-        self.assertEqual(len(controls), 8)
+        self.assertEqual(len(controls), 12)
         self.assertEqual([x.value for x in controls[:7]], [False, 0.7, 48, 24, 0.3, "LAB", "Auto"])
         self.assertFalse(controls[7].visible)
+        self.assertEqual([x.value for x in controls[8:]], [-2, 42, 0, 50])
+
+    def test_ui_skin_ranges_reach_core_and_bad_ranges_skip(self):
+        args = DEFAULT_ARGS + [-2, 42, 0, 8]  # exclude this fixture's warm skin
+        self.host.prepare(self.p, args)
+        pp = SimpleNamespace(image=self.generated, index=0)
+        self.host.script.postprocess_image_after_composite(self.p, pp, *args)
+        self.assertIs(pp.image, self.generated)
+        with self.assertLogs("forge.skin_color_match", level="ERROR"):
+            self.host.script.process(self.p, *(DEFAULT_ARGS + [42, -2, 0, 50]))
+        self.assertIsNone(getattr(self.p, self.host.adapter.STATE_KEY))
 
     def test_hook_corrects_and_preserves_prompt_seed_and_source(self):
         self.p.prompt, self.p.seed = "test prompt", 123

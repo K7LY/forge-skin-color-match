@@ -14,10 +14,21 @@ from PIL import Image, ImageOps
 ROOT = str(Path(__file__).resolve().parents[1])
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
-from skinmatch_core import MatchSettings, mask_array, match_skin  # noqa: E402
+from skinmatch_core import MatchSettings, SkinRange, mask_array, match_skin  # noqa: E402
 
 logger = logging.getLogger("forge.skin_color_match")
 STATE_KEY = "_forge_skin_color_match"
+
+
+def match_settings(strength, radius, feather, brightness, mode, a_min, a_max, b_min, b_max):
+    return MatchSettings(
+        float(strength),
+        int(radius),
+        int(feather),
+        float(brightness),
+        mode,
+        skin_range=SkinRange(float(a_min), float(a_max), float(b_min), float(b_max)),
+    )
 
 
 @dataclass
@@ -58,13 +69,36 @@ class Script(scripts.Script):
                 visible=False,
             )
             mode.change(fn=lambda value: gr.update(visible=value == "Manual"), inputs=mode, outputs=manual)
+            with gr.Accordion("Skin Color Range (LAB)", open=False):
+                gr.Markdown(
+                    "Only colours inside both ranges are sampled and corrected. "
+                    "a: green (-) to red (+); b: blue (-) to yellow (+). "
+                    "Narrower ranges help exclude nearby clothing colours."
+                )
+                a_min = gr.Slider(-20, 60, value=-2, step=1, label="Skin a Minimum")
+                a_max = gr.Slider(-20, 60, value=42, step=1, label="Skin a Maximum")
+                b_min = gr.Slider(-20, 80, value=0, step=1, label="Skin b Minimum")
+                b_max = gr.Slider(-20, 80, value=50, step=1, label="Skin b Maximum")
             gr.Markdown(
                 "CPU only. Manual: upload a white-on-black mask aligned with the original image. "
                 "Disable Forge's img2img color correction; this extension skips when it is active. "
                 "Colour heuristics can confuse skin-coloured fabric. See README for limitations. "
                 "[Source / AGPL-3.0](https://github.com/K7LY/forge-skin-color-match)"
             )
-        return [enabled, strength, radius, feather, brightness, space, mode, manual]
+        return [
+            enabled,
+            strength,
+            radius,
+            feather,
+            brightness,
+            space,
+            mode,
+            manual,
+            a_min,
+            a_max,
+            b_min,
+            b_max,
+        ]
 
     def process(
         self,
@@ -77,6 +111,10 @@ class Script(scripts.Script):
         space="LAB",
         mode="Auto",
         manual=None,
+        a_min=-2,
+        a_max=42,
+        b_min=0,
+        b_max=50,
     ):
         # Request-local state: no counters/images survive on the shared Script.
         setattr(p, STATE_KEY, None)
@@ -89,7 +127,7 @@ class Script(scripts.Script):
                 raise ValueError("Forge lacks the required after-composite hook")
             if space != "LAB":
                 raise ValueError("Only LAB is supported")
-            MatchSettings(float(strength), int(radius), int(feather), float(brightness), mode).validate()
+            match_settings(strength, radius, feather, brightness, mode, a_min, a_max, b_min, b_max).validate()
             raw = processing.create_binary_mask(p.image_mask, round=getattr(p, "mask_round", True)).copy()
             if getattr(p, "inpainting_mask_invert", 0):
                 raw = ImageOps.invert(raw)
@@ -184,6 +222,10 @@ class Script(scripts.Script):
         space="LAB",
         mode="Auto",
         manual=None,
+        a_min=-2,
+        a_max=42,
+        b_min=0,
+        b_max=50,
     ):
         if not enabled or strength == 0:
             return
@@ -233,7 +275,7 @@ class Script(scripts.Script):
             edit_array = np.minimum(
                 edit_array, 1 - np.asarray(overlay_image.getchannel("A"), dtype=np.float32) / 255
             )
-            settings = MatchSettings(float(strength), int(radius), int(feather), float(brightness), mode)
+            settings = match_settings(strength, radius, feather, brightness, mode, a_min, a_max, b_min, b_max)
             result, report = match_skin(pp.image, reference, edit_array, settings, state.manual_masks[index])
             state.reports.append(report)
             if report.reason == "corrected":
