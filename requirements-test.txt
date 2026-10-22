@@ -1,0 +1,11 @@
+# Standalone development only; DO NOT install this into an existing Forge venv.
+# Forge already supplies all extension runtime dependencies.
+numpy==1.26.2
+opencv-python-headless==4.10.0.84
+Pillow==9.5.0
+gradio==4.40.0
+huggingface-hub==0.26.2
+pydantic==2.8.2
+fastapi==0.104.1
+httpx==0.24.1
+ruff==0.17.1

@@ -1,0 +1,8 @@
+.research/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+artifacts/
+dist/
+*.egg-info/

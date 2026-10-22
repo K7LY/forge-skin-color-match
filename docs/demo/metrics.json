@@ -1,0 +1,52 @@
+{
+  "fixture": "Deterministic synthetic skin; not a real-image quality benchmark",
+  "settings": {
+    "strength": 0.7,
+    "reference_radius": 48,
+    "feather": 24,
+    "brightness": 0.3,
+    "reference_mode": "Auto",
+    "min_pixels": 64
+  },
+  "scenarios": {
+    "Arm patch": {
+      "reason": "corrected",
+      "regions": [
+        {
+          "target_pixels": 3900,
+          "reference_pixels": 18387,
+          "delta_e_before": 9.35611629486084,
+          "delta_e_after": 7.129421710968018
+        }
+      ],
+      "outside_changed_pixels": 0,
+      "strength_zero_exact": true
+    },
+    "Face patch": {
+      "reason": "corrected",
+      "regions": [
+        {
+          "target_pixels": 3900,
+          "reference_pixels": 18387,
+          "delta_e_before": 7.679415225982666,
+          "delta_e_after": 5.658517837524414
+        }
+      ],
+      "outside_changed_pixels": 0,
+      "strength_zero_exact": true
+    },
+    "Clothes near patch": {
+      "reason": "corrected",
+      "regions": [
+        {
+          "target_pixels": 3900,
+          "reference_pixels": 14187,
+          "delta_e_before": 9.201713562011719,
+          "delta_e_after": 6.9163384437561035
+        }
+      ],
+      "outside_changed_pixels": 0,
+      "strength_zero_exact": true
+    }
+  }
+}
