@@ -182,9 +182,11 @@ class CoreTests(unittest.TestCase):
             generated, Image.fromarray(original), mask, MatchSettings(strength=1, feather=0)
         )
         self.assertEqual(report.reason, "corrected")
-        delta = rgb_to_lab(np.array(result)) - rgb_to_lab(np.array(generated))
-        self.assertLess(np.abs(delta[..., 0]).max(), 5.0)
-        self.assertLess(np.linalg.norm(delta[..., 1:], axis=-1).max(), 19.0)
+        actual = rgb_to_lab(np.array(result))[mask > 0]
+        expected = rgb_to_lab(original)[mask > 0]
+        self.assertTrue(np.isfinite(actual).all())
+        self.assertLess(np.linalg.norm(actual.mean(axis=0) - expected.mean(axis=0)), 0.5)
+        self.assertLess(actual.std(axis=0).max(), 0.01)
 
     def test_brightness_zero_preserves_lightness_within_quantization(self):
         original, mask = scene()
@@ -307,7 +309,13 @@ class CoreTests(unittest.TestCase):
         original[mask > 0] = (10, 50, 100)
         output, report = match_skin(generated, Image.fromarray(original), mask)
         self.assertEqual(report.reason, "corrected")
-        np.testing.assert_array_equal(np.array(output)[65, 95:155], np.array(generated)[65, 95:155])
+        alternate = original.copy()
+        alternate[mask > 0] = (10, 100, 50)
+        other, _ = match_skin(generated, Image.fromarray(alternate), mask)
+        np.testing.assert_array_equal(np.array(output), np.array(other))
+        self.assertGreater(
+            np.abs(np.array(output)[65, 120].astype(float) - np.array(generated)[65, 120]).max(), 0
+        )
 
 
 if __name__ == "__main__":

@@ -1,6 +1,21 @@
 {
   "fixture": "Deterministic synthetic skin; not a real-image quality benchmark",
   "settings": {
+    "strength": 1.0,
+    "reference_radius": 48,
+    "feather": 24,
+    "brightness": 1.0,
+    "reference_mode": "Auto",
+    "min_pixels": 64,
+    "skin_range": {
+      "a_min": -2.0,
+      "a_max": 42.0,
+      "b_min": 0.0,
+      "b_max": 50.0
+    }
+  },
+  "baseline_ref": "e77dda6",
+  "baseline_default_settings": {
     "strength": 0.7,
     "reference_radius": 48,
     "feather": 24,
@@ -14,33 +29,44 @@
       "b_max": 50.0
     }
   },
-  "baseline_ref": "e83bb2d",
   "comparison_metric": "Same original masked patch for every version; uniform untrimmed mean LAB",
   "scenarios": {
     "Arm patch": {
       "reason": "corrected",
       "regions": [
         {
-          "target_pixels": 3900,
+          "target_pixels": 2544,
           "reference_pixels": 18387,
           "delta_e_before": 9.466958045959473,
-          "delta_e_after": 4.198607444763184
+          "delta_e_after": 0.15987297892570496,
+          "gamut_scale": 1.0
         }
       ],
       "outside_changed_pixels": 0,
       "strength_zero_exact": true,
+      "generated_detail_preservation": {
+        "interior_pixels": 1974,
+        "luminance_shift_variation_rms": 0.057837050408124924,
+        "luminance_contrast_ratio": 1.0135855674743652,
+        "fine_texture_correlation": 0.9963135554436642,
+        "fine_texture_contrast_ratio": 1.0036572217941284
+      },
       "against_original_patch": {
         "before": {
           "delta_e": 9.6359281539917,
           "chroma_error": 8.459392547607422
         },
         "current": {
+          "delta_e": 0.3920181393623352,
+          "chroma_error": 0.05043979361653328
+        },
+        "previous": {
           "delta_e": 4.577023506164551,
           "chroma_error": 2.5992300510406494
         },
-        "previous": {
-          "delta_e": 7.496999740600586,
-          "chroma_error": 6.1545891761779785
+        "previous_at_current_controls": {
+          "delta_e": 0.3894737958908081,
+          "chroma_error": 0.059271521866321564
         }
       }
     },
@@ -48,26 +74,38 @@
       "reason": "corrected",
       "regions": [
         {
-          "target_pixels": 3900,
+          "target_pixels": 2544,
           "reference_pixels": 18387,
           "delta_e_before": 7.6036200523376465,
-          "delta_e_after": 2.4405033588409424
+          "delta_e_after": 0.15940794348716736,
+          "gamut_scale": 1.0
         }
       ],
       "outside_changed_pixels": 0,
       "strength_zero_exact": true,
+      "generated_detail_preservation": {
+        "interior_pixels": 1974,
+        "luminance_shift_variation_rms": 0.04843719303607941,
+        "luminance_contrast_ratio": 1.0361478328704834,
+        "fine_texture_correlation": 0.9988947874619192,
+        "fine_texture_contrast_ratio": 1.0323529243469238
+      },
       "against_original_patch": {
         "before": {
           "delta_e": 7.534901142120361,
           "chroma_error": 7.5105671882629395
         },
         "current": {
+          "delta_e": 0.39085280895233154,
+          "chroma_error": 0.060422614216804504
+        },
+        "previous": {
           "delta_e": 2.4102463722229004,
           "chroma_error": 2.3474984169006348
         },
-        "previous": {
-          "delta_e": 5.51370096206665,
-          "chroma_error": 5.48415994644165
+        "previous_at_current_controls": {
+          "delta_e": 0.4000822901725769,
+          "chroma_error": 0.05434780940413475
         }
       }
     },
@@ -75,26 +113,38 @@
       "reason": "corrected",
       "regions": [
         {
-          "target_pixels": 3900,
+          "target_pixels": 2544,
           "reference_pixels": 14187,
           "delta_e_before": 9.216731071472168,
-          "delta_e_after": 3.589101791381836
+          "delta_e_after": 0.06273350119590759,
+          "gamut_scale": 1.0
         }
       ],
       "outside_changed_pixels": 0,
       "strength_zero_exact": true,
+      "generated_detail_preservation": {
+        "interior_pixels": 1974,
+        "luminance_shift_variation_rms": 0.06649378687143326,
+        "luminance_contrast_ratio": 1.0335742235183716,
+        "fine_texture_correlation": 0.9957847140082712,
+        "fine_texture_contrast_ratio": 1.0217832326889038
+      },
       "against_original_patch": {
         "before": {
           "delta_e": 9.6359281539917,
           "chroma_error": 8.459392547607422
         },
         "current": {
+          "delta_e": 1.5679762363433838,
+          "chroma_error": 0.24830175936222076
+        },
+        "previous": {
           "delta_e": 4.66152811050415,
           "chroma_error": 2.4890501499176025
         },
-        "previous": {
-          "delta_e": 7.507650375366211,
-          "chroma_error": 6.1235671043396
+        "previous_at_current_controls": {
+          "delta_e": 1.488540530204773,
+          "chroma_error": 0.19065555930137634
         }
       }
     },
@@ -102,26 +152,38 @@
       "reason": "corrected",
       "regions": [
         {
-          "target_pixels": 3900,
+          "target_pixels": 2544,
           "reference_pixels": 18387,
-          "delta_e_before": 20.14798927307129,
-          "delta_e_after": 12.6658296585083
+          "delta_e_before": 20.160024642944336,
+          "delta_e_after": 0.1311197727918625,
+          "gamut_scale": 1.0
         }
       ],
       "outside_changed_pixels": 0,
       "strength_zero_exact": true,
+      "generated_detail_preservation": {
+        "interior_pixels": 1974,
+        "luminance_shift_variation_rms": 0.03550403565168381,
+        "luminance_contrast_ratio": 1.0354331731796265,
+        "fine_texture_correlation": 0.999963145542526,
+        "fine_texture_contrast_ratio": 1.0354244709014893
+      },
       "against_original_patch": {
         "before": {
           "delta_e": 20.548479080200195,
           "chroma_error": 13.082980155944824
         },
         "current": {
+          "delta_e": 0.3642691373825073,
+          "chroma_error": 0.04613553732633591
+        },
+        "previous": {
           "delta_e": 13.1532564163208,
           "chroma_error": 3.8268496990203857
         },
-        "previous": {
-          "delta_e": 18.791418075561523,
-          "chroma_error": 11.145981788635254
+        "previous_at_current_controls": {
+          "delta_e": 0.7236440777778625,
+          "chroma_error": 0.06188546121120453
         }
       }
     },
@@ -129,26 +191,38 @@
       "reason": "corrected",
       "regions": [
         {
-          "target_pixels": 910,
+          "target_pixels": 610,
           "reference_pixels": 14604,
           "delta_e_before": 7.562196254730225,
-          "delta_e_after": 2.092776298522949
+          "delta_e_after": 0.17223185300827026,
+          "gamut_scale": 1.0
         }
       ],
       "outside_changed_pixels": 0,
       "strength_zero_exact": true,
+      "generated_detail_preservation": {
+        "interior_pixels": 220,
+        "luminance_shift_variation_rms": 0.008784190751612186,
+        "luminance_contrast_ratio": 1.0127376317977905,
+        "fine_texture_correlation": 0.9999855563997483,
+        "fine_texture_contrast_ratio": 1.012998342514038
+      },
       "against_original_patch": {
         "before": {
           "delta_e": 7.541518211364746,
           "chroma_error": 7.5155110359191895
         },
         "current": {
+          "delta_e": 0.0005170076037757099,
+          "chroma_error": 0.0005004745908081532
+        },
+        "previous": {
           "delta_e": 2.091817855834961,
           "chroma_error": 2.0395021438598633
         },
-        "previous": {
-          "delta_e": 7.313328266143799,
-          "chroma_error": 7.290052890777588
+        "previous_at_current_controls": {
+          "delta_e": 0.0015658042393624783,
+          "chroma_error": 0.0015147110680118203
         }
       }
     }

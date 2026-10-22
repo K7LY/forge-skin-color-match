@@ -55,10 +55,10 @@ class Script(scripts.Script):
     def ui(self, is_img2img):
         with gr.Accordion("Skin Color Match", open=False):
             enabled = gr.Checkbox(label="Enable Skin Color Match", value=False)
-            strength = gr.Slider(0, 1, value=0.7, step=0.05, label="Correction Strength")
+            strength = gr.Slider(0, 1, value=1.0, step=0.05, label="Correction Strength")
             radius = gr.Slider(1, 256, value=48, step=1, label="Reference Radius (px)")
             feather = gr.Slider(0, 128, value=24, step=1, label="Mask Feather (px)")
-            brightness = gr.Slider(0, 1, value=0.3, step=0.05, label="Brightness Correction")
+            brightness = gr.Slider(0, 1, value=1.0, step=0.05, label="Brightness Correction")
             space = gr.Dropdown(choices=["LAB"], value="LAB", label="Color Space")
             mode = gr.Radio(choices=["Auto", "Manual"], value="Auto", label="Reference Mode")
             manual = gr.Image(
@@ -80,7 +80,9 @@ class Script(scripts.Script):
                 b_min = gr.Slider(-20, 80, value=0, step=1, label="Skin b Minimum")
                 b_max = gr.Slider(-20, 80, value=50, step=1, label="Skin b Maximum")
             gr.Markdown(
-                "CPU only. Manual: upload a white-on-black mask aligned with the original image. "
+                "Match-priority defaults: Strength 1.0 / Brightness 1.0. "
+                "Skin shading and texture retain their LAB contrast. CPU processing. "
+                "Manual uses a white-on-black mask aligned with the original image. "
                 "Disable Forge's img2img color correction; this extension skips when it is active. "
                 "Colour heuristics can confuse skin-coloured fabric. See README for limitations. "
                 "[Source / AGPL-3.0](https://github.com/K7LY/forge-skin-color-match)"
@@ -104,10 +106,10 @@ class Script(scripts.Script):
         self,
         p,
         enabled=False,
-        strength=0.7,
+        strength=1.0,
         radius=48,
         feather=24,
-        brightness=0.3,
+        brightness=1.0,
         space="LAB",
         mode="Auto",
         manual=None,
@@ -215,10 +217,10 @@ class Script(scripts.Script):
         p,
         pp,
         enabled=False,
-        strength=0.7,
+        strength=1.0,
         radius=48,
         feather=24,
-        brightness=0.3,
+        brightness=1.0,
         space="LAB",
         mode="Auto",
         manual=None,

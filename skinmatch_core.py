@@ -1,4 +1,4 @@
-"""CPU-only, conservative skin colour transfer. No Forge or Gradio imports.
+"""CPU-only skin mean-colour alignment with additive, detail-preserving LAB shifts.
 
 All colour statistics use OpenCV float CIELAB: L=0..100, signed a/b.
 White masks select editable pixels. Input arrays must already share coordinates.
@@ -34,10 +34,10 @@ DEFAULT_SKIN_RANGE = SkinRange()
 
 @dataclass(frozen=True)
 class MatchSettings:
-    strength: float = 0.7
+    strength: float = 1.0
     reference_radius: int = 48
     feather: int = 24
-    brightness: float = 0.3
+    brightness: float = 1.0
     reference_mode: str = "Auto"
     min_pixels: int = 64
     skin_range: SkinRange = DEFAULT_SKIN_RANGE
@@ -60,6 +60,7 @@ class RegionReport:
     reference_pixels: int
     delta_e_before: float
     delta_e_after: float
+    gamut_scale: float = 1.0
 
 
 @dataclass
@@ -160,17 +161,18 @@ def inward_feather(support: np.ndarray, radius: int, adaptive: bool = False) -> 
     return _ramp(distance, 1, radius + 1) * support
 
 
-def _stats(lab, weights, minimum):
+def _stats(lab, weights, minimum, trim=True):
     selected = weights > 0
     if np.count_nonzero(selected) < minimum:
         return None
     values = lab[selected]
     w = weights[selected]
-    median = np.median(values, axis=0)
-    mad = np.median(np.abs(values - median), axis=0)
-    limit = np.maximum(mad * 4.0, [12.0, 6.0, 6.0])
-    keep = np.all(np.abs(values - median) <= limit, axis=1)
-    values, w = values[keep], w[keep]
+    if trim:
+        median = np.median(values, axis=0)
+        mad = np.median(np.abs(values - median), axis=0)
+        limit = np.maximum(mad * 4.0, [12.0, 6.0, 6.0])
+        keep = np.all(np.abs(values - median) <= limit, axis=1)
+        values, w = values[keep], w[keep]
     if len(w) < minimum or w.sum() < minimum * 0.5:
         return None
     mean = np.average(values, axis=0, weights=w)
@@ -199,6 +201,32 @@ def _nearest_reference(candidates, distances, minimum, radius):
 
 
 DEFAULT_SETTINGS = MatchSettings()
+
+
+def _gamut_scale(pixels: np.ndarray, offsets: np.ndarray) -> float:
+    """Use one common scale if a shift would clip skin shadows/highlights.
+
+    OpenCV clips RGB on LAB->RGB conversion. A float round trip detects that
+    loss without adding another colour library. The tolerance covers OpenCV's
+    interpolation precision; there is no fixed cap on an otherwise valid shift.
+    """
+
+    def fits(scale):
+        candidate = (pixels + offsets * scale).astype(np.float32).reshape(-1, 1, 3)
+        rgb = cv2.cvtColor(candidate, cv2.COLOR_LAB2RGB)
+        roundtrip = cv2.cvtColor(rgb, cv2.COLOR_RGB2LAB)
+        return bool(np.max(np.linalg.norm(roundtrip - candidate, axis=-1)) <= 0.6)
+
+    if fits(1.0):
+        return 1.0
+    low, high = 0.0, 1.0
+    for _ in range(12):
+        mid = (low + high) * 0.5
+        if fits(mid):
+            low = mid
+        else:
+            high = mid
+    return low
 
 
 def match_skin(
@@ -259,8 +287,16 @@ def match_skin(
         component = labels[roi] == label
         if not np.any(base_alpha[roi][component] > 0):
             continue
-        target_weights = target_skin[roi] * edit[roi] * component
-        target_stats = _stats(lab[roi], target_weights, settings.min_pixels)
+        # All accepted target skin contributes equally. Trimming its genuine
+        # highlights/shadows would bias the cast and leave pale skin too light.
+        target_weights = edit[roi] * component
+        # Estimate the cast from the fully generated interior. A composited
+        # boundary already contains original pixels and dilutes that estimate.
+        interior_weights = target_weights * (base_alpha[roi] >= 0.98)
+        target_stats = _stats(lab[roi], interior_weights, settings.min_pixels, trim=False)
+        interior_stats = target_stats is not None
+        if target_stats is None:
+            target_stats = _stats(lab[roi], target_weights, settings.min_pixels, trim=False)
         if target_stats is None:
             continue
         if manual is None:
@@ -281,26 +317,19 @@ def match_skin(
             reference_stats = _stats(ref_lab[roi], weights, settings.min_pixels)
         else:
             reference_stats = manual_stats
+            weights = ref_skin[roi] * manual[roi]
         if reference_stats is None:
             continue
-        target_mean, target_std, n_target = target_stats
-        ref_mean, ref_std, n_reference = reference_stats
-        gain = np.clip(ref_std / np.maximum(target_std, 1.0), 0.8, 1.25)
-        # Constant patches need a mean shift, never noise amplification.
-        gain = np.where(target_std < 1.0, 1.0, gain)
-        # Keep luminance contrast especially close to the generated shading.
-        gain[0] = np.clip(gain[0], 0.95, 1.05)
+        target_mean, _, n_target = target_stats
+        ref_mean, _, n_reference = reference_stats
         local_lab = lab[roi]
-        transferred = (local_lab - target_mean) * gain + ref_mean
-        delta = transferred - local_lab
-        delta[..., 0] = np.clip(delta[..., 0], -15, 15) * settings.brightness
-        chroma = delta[..., 1:]
-        length = np.linalg.norm(chroma, axis=-1, keepdims=True)
-        delta[..., 1:] = chroma * np.minimum(1.0, 18.0 / np.maximum(length, 1e-6))
-        corrected_lab = local_lab + delta * settings.strength
-        corrected_lab[..., 0] = np.clip(corrected_lab[..., 0], 0, 100)
-        corrected_lab[..., 1:] = np.clip(corrected_lab[..., 1:], -100, 100)
-        corrected_rgb = cv2.cvtColor(corrected_lab.astype(np.float32), cv2.COLOR_LAB2RGB) * 255.0
+        # Unit gain preserves all LAB differences between interior pixels:
+        # shadows, highlights and fine detail move together with the mean.
+        delta = ref_mean - target_mean
+        if not interior_stats:
+            coverage = np.average(edit[roi][component], weights=target_weights[component])
+            delta /= max(float(coverage), 0.05)
+        delta[0] *= settings.brightness
         alpha = base_alpha[roi] * component
         if settings.feather > 0:
             # Consistent original skin can guide boundary blending: a hard
@@ -311,15 +340,50 @@ def match_skin(
                 & (np.linalg.norm(ref_lab[roi][..., 1:] - ref_mean[1:], axis=-1) <= 10)
                 & (np.abs(ref_lab[roi][..., 0] - ref_mean[0]) <= 20)
             )
-            projected = np.sum((ref_lab[roi] - local_lab) * delta, axis=-1)
-            magnitude = np.sum(delta * delta, axis=-1)
+            # Normalized convolution extends only selected external reference
+            # skin into the boundary. It also handles newly created skin where
+            # the original masked pixels were background, clothing or a hole.
+            sigma = max(1.0, min(4.0, settings.feather / 6.0))
+            nearby_weight = cv2.GaussianBlur(weights.astype(np.float32), (0, 0), sigma)
+            nearby_colour = cv2.GaussianBlur(
+                (ref_lab[roi] * weights[..., None]).astype(np.float32), (0, 0), sigma
+            )
+            expected = np.broadcast_to(ref_mean, local_lab.shape).copy()
+            near = nearby_weight > 1e-4
+            expected[near] = nearby_colour[near] / nearby_weight[near, None]
+            expected[original_consistent] = ref_lab[roi][original_consistent]
+            projected = np.sum((expected - local_lab) * delta, axis=-1)
+            magnitude = np.sum(delta * delta)
             needed = np.clip(projected / np.maximum(magnitude, 1e-6), 0, 1)
-            boundary = component & original_consistent & (base_alpha[roi] < edit[roi])
-            alpha[boundary] = (edit[roi] * needed)[boundary]
+            # Without trustworthy original skin, retain the generated shading
+            # and fade only edges already close to the surrounding skin colour.
+            # Otherwise a legitimate dark boundary would dilute the whole match.
+            external_need = _ramp(np.linalg.norm(expected - local_lab, axis=-1), 0.5, 2.0)
+            needed[~original_consistent] = (edit[roi] * external_need)[~original_consistent]
+            boundary = component & (base_alpha[roi] < edit[roi])
+            # pp.image is already composited. Multiplying needed by edit again
+            # would attenuate a soft edge twice and leave its colour cast.
+            alpha[boundary] = np.minimum(edit[roi], needed)[boundary]
         changed = alpha > 0
         if not changed.any():
             continue
-        blended = np.rint(rgb[roi] * (1 - alpha[..., None]) + corrected_rgb * alpha[..., None])
+        # Solve for the final composited mean, not just the pre-feather mean.
+        # Already-matching/partly composited edges stay protected, while the
+        # common interior translation supplies exactly the remaining offset.
+        mean_alpha = float(np.average(alpha[component], weights=target_weights[component]))
+        if mean_alpha <= 1e-6:
+            continue
+        final_mean = np.average(local_lab[component], axis=0, weights=target_weights[component])
+        delta = ref_mean - final_mean
+        delta[0] *= settings.brightness
+        delta /= mean_alpha
+        offsets = delta * settings.strength * alpha[..., None]
+        gamut = _gamut_scale(local_lab[changed], offsets[changed])
+        if gamut == 0:
+            continue
+        corrected_lab = local_lab + offsets * gamut
+        corrected_rgb = cv2.cvtColor(corrected_lab.astype(np.float32), cv2.COLOR_LAB2RGB) * 255.0
+        blended = np.rint(corrected_rgb)
         local_output = output[roi]
         local_output[..., :3][changed] = np.clip(blended[changed], 0, 255).astype(np.uint8)
         after_lab = rgb_to_lab(local_output[..., :3].copy())
@@ -331,6 +395,7 @@ def match_skin(
                 n_reference,
                 float(np.linalg.norm(before_mean - ref_mean)),
                 float(np.linalg.norm(after_mean - ref_mean)),
+                gamut,
             )
         )
     if not report.regions or np.array_equal(output, np.asarray(generated)):

@@ -11,6 +11,7 @@ import types
 from dataclasses import asdict
 from pathlib import Path
 
+import cv2
 import numpy as np
 from PIL import Image, ImageDraw
 
@@ -27,6 +28,23 @@ def mean_colour_error(image, original, selected):
     return {
         "delta_e": float(np.linalg.norm(actual - expected)),
         "chroma_error": float(np.linalg.norm(actual[1:] - expected[1:])),
+    }
+
+
+def detail_metrics(before, after, mask):
+    before_l = rgb_to_lab(np.array(before))[..., 0]
+    after_l = rgb_to_lab(np.array(after))[..., 0]
+    distance = cv2.distanceTransform((mask > 0).astype(np.uint8), cv2.DIST_L2, cv2.DIST_MASK_PRECISE)
+    core = distance >= min(10, max(2, float(distance.max()) - 1))
+    delta = after_l[core] - before_l[core]
+    before_high = before_l - cv2.GaussianBlur(before_l, (0, 0), 1.0)
+    after_high = after_l - cv2.GaussianBlur(after_l, (0, 0), 1.0)
+    return {
+        "interior_pixels": int(core.sum()),
+        "luminance_shift_variation_rms": float(np.std(delta)),
+        "luminance_contrast_ratio": float(after_l[core].std() / max(before_l[core].std(), 1e-6)),
+        "fine_texture_correlation": float(np.corrcoef(before_high[core], after_high[core])[0, 1]),
+        "fine_texture_contrast_ratio": float(after_high[core].std() / max(before_high[core].std(), 1e-6)),
     }
 
 
@@ -74,6 +92,7 @@ def evaluate(output, baseline_ref=None):
             **asdict(report),
             "outside_changed_pixels": int(outside_changed),
             "strength_zero_exact": zero.tobytes() == generated.tobytes(),
+            "generated_detail_preservation": detail_metrics(generated, result, mask),
             "against_original_patch": {
                 "before": mean_colour_error(generated, original, mask > 0),
                 "current": mean_colour_error(result, original, mask > 0),
@@ -87,13 +106,29 @@ def evaluate(output, baseline_ref=None):
             metrics[name]["against_original_patch"]["previous"] = mean_colour_error(
                 previous, original, mask > 0
             )
+            previous_equal_controls, _ = baseline.match_skin(
+                generated,
+                Image.fromarray(original),
+                mask,
+                baseline.MatchSettings(
+                    strength=settings.strength,
+                    brightness=settings.brightness,
+                    reference_radius=settings.reference_radius,
+                    feather=settings.feather,
+                ),
+            )
+            metrics[name]["against_original_patch"]["previous_at_current_controls"] = mean_colour_error(
+                previous_equal_controls,
+                original,
+                mask > 0,
+            )
             tiles.append(previous)
         tiles.append(result)
         rows.append((name, tiles))
     columns = ["Original reference", "Generated / before"]
     if baseline:
-        columns.append("Previous version")
-    columns.append("Current version")
+        columns.append("Previous default")
+    columns.append("Match-priority default")
     canvas = Image.new("RGB", (256 * len(columns), 228 * len(rows) + 28), (24, 27, 33))
     draw = ImageDraw.Draw(canvas)
     for index, title in enumerate(columns):
@@ -119,6 +154,7 @@ def evaluate(output, baseline_ref=None):
         "fixture": "Deterministic synthetic skin; not a real-image quality benchmark",
         "settings": asdict(settings),
         "baseline_ref": baseline_ref,
+        "baseline_default_settings": asdict(baseline.MatchSettings()) if baseline else None,
         "comparison_metric": "Same original masked patch for every version; uniform untrimmed mean LAB",
         "scenarios": metrics,
     }

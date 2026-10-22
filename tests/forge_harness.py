@@ -188,4 +188,4 @@ class Host:
                 p.overlay_images *= p.batch_size
 
 
-DEFAULT_ARGS = [True, 0.7, 48, 24, 0.3, "LAB", "Auto", None]
+DEFAULT_ARGS = [True, 1.0, 48, 24, 1.0, "LAB", "Auto", None]

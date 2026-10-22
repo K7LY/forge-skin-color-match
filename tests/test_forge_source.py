@@ -91,6 +91,7 @@ class ForgeSourceTests(unittest.TestCase):
                                     state.reports[-1].regions[0].delta_e_after,
                                     state.reports[-1].regions[0].delta_e_before,
                                 )
+                                self.assertLess(state.reports[-1].regions[0].delta_e_after, 0.75)
 
     def test_real_rgba_mask_uses_alpha_and_inverts_once(self):
         original, mask = scene()

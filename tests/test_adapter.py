@@ -27,7 +27,7 @@ class AdapterTests(unittest.TestCase):
         with gr.Blocks():
             controls = self.host.script.ui(True)
         self.assertEqual(len(controls), 12)
-        self.assertEqual([x.value for x in controls[:7]], [False, 0.7, 48, 24, 0.3, "LAB", "Auto"])
+        self.assertEqual([x.value for x in controls[:7]], [False, 1.0, 48, 24, 1.0, "LAB", "Auto"])
         self.assertFalse(controls[7].visible)
         self.assertEqual([x.value for x in controls[8:]], [-2, 42, 0, 50])
 
@@ -52,6 +52,14 @@ class AdapterTests(unittest.TestCase):
         np.testing.assert_array_equal(
             np.array(pp.image)[self.mask == 0], np.array(self.generated)[self.mask == 0]
         )
+
+    def test_omitted_api_settings_use_match_priority_defaults(self):
+        self.host.prepare(self.p, [True])
+        pp = SimpleNamespace(image=self.generated, index=0)
+        self.host.script.postprocess_image_after_composite(self.p, pp, True)
+        report = getattr(self.p, self.host.adapter.STATE_KEY).reports[-1]
+        self.assertEqual(report.reason, "corrected")
+        self.assertLess(report.regions[0].delta_e_after, 0.5)
 
     def test_disabled_zero_and_non_inpaint_keep_image_identity(self):
         for enabled, strength, mask in (
