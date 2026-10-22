@@ -61,7 +61,8 @@ class Script(scripts.Script):
             gr.Markdown(
                 "CPU only. Manual: upload a white-on-black mask aligned with the original image. "
                 "Disable Forge's img2img color correction; this extension skips when it is active. "
-                "Colour heuristics can confuse skin-coloured fabric. See README for limitations."
+                "Colour heuristics can confuse skin-coloured fabric. See README for limitations. "
+                "[Source / AGPL-3.0](https://github.com/K7LY/forge-skin-color-match)"
             )
         return [enabled, strength, radius, feather, brightness, space, mode, manual]
 
